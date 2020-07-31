@@ -1,0 +1,168 @@
+---
+title: "Practical ML"
+author: "Shubham Patil"
+date: "31/07/2020"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(caret)
+```
+
+## Reading data
+
+The data links are given below:
+
+* [Training Set](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv)
+* [Testing Set](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv)
+* [Documentation](http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har )
+
+Please, download the datasets on your working directory before proceeding further.
+
+```{r}
+train <- read.csv("pml-training.csv")
+test <- read.csv("pml-testing.csv")
+```
+
+## Cleaning data
+
+Checking the characteristics of the data.
+
+```{r}
+dim(train)
+str(train)
+```
+
+There are 19622 observations on 160 variables in the data.
+
+There are two instant takeaways from the structure of the data:
+1) The first seven columns of the data can be eliminated for the prediction purposes as they may introduce some noise in our model.
+2) There are lot of missing values (NAs) in the data. We can impute these values by means of the respective columns in case of numerical columns. For columns with character values, we can leave them as they are to avoid loss of important data.
+
+```{r}
+train1 <- train[, - c(1:7)]
+for (col in names(train1)) {
+    if (is.numeric(train1[, col]) | is.integer(train1[, col])) {
+        mu <- mean(train1[, col], na.rm = TRUE)
+        na_indices <- which(is.na(train1[, col]))
+        for (x in na_indices) {
+            train1[x, col] <- mu
+        }
+    }
+    else {
+        next
+    }
+}
+dim(train1)
+```
+
+## Feature Selection
+
+We can eliminate the features which have near zero variance (too few unique values).
+
+```{r}
+nzv <- nearZeroVar(train1)
+train2 <- train1[, - nzv]
+dim(train2)
+```
+
+We have got rid of too many garbage variables in the data. We will now remove the variables which are highly correlated with each other. We will specify threshold of correlation to eliminate the variable to 80%.
+
+```{r}
+correlations <- cor(train2[, - 53])
+highlyCorDescr <- findCorrelation(correlations, cutoff = .80)
+train3 <- train2[, - highlyCorDescr]
+dim(train3)
+```
+
+Now, we seem to have tidier data than before. We can now create partitions of the data. We will assign it to `data` object.
+
+```{r}
+data <- train3
+```
+
+
+## Creating data partitions
+
+We will split the data in 70% training and 30% testing sets. Our predictor variable is `classe`.
+
+```{r}
+set.seed(041) 
+split_indices <- createDataPartition(data$classe, p = 0.7, list = FALSE)
+training <- data[split_indices, ]
+testing <- data[- split_indices, ]
+X <- training[, - 40]
+y <- training$classe
+dim(training)
+dim(testing)
+```
+
+## Building & selecting model
+
+We will build 3 models for the data:
+1) Support Vector Machine Classifier
+2) Decision Tree Classifier
+3) Random Forest Classifier
+
+We will also use 5 cross validation sets to train our models.
+
+# Model 1: Linear SVM
+
+```{r}
+set.seed(041)
+start <- proc.time()
+controlparams <- trainControl(method = "cv", 5)
+model_1 <- train(classe ~ ., data = training, method = "svmLinear2", trControl = controlparams, type = "C-classification")
+predictions_1 <- predict(model_1, testing)
+confusionMatrix(factor(testing$classe), predictions_1)
+proc.time() - start
+```
+
+# Model 2: Decision Tree
+
+```{r}
+set.seed(041)
+start <- proc.time()
+controlparams <- trainControl(method = "cv", 5)
+model_2 <- train(classe ~ ., data = training, method = "rpart2", trControl = controlparams)
+predictions_2 <- predict(model_2, testing)
+confusionMatrix(factor(testing$classe), predictions_2)
+proc.time() - start
+```
+
+# Model 3: Random Forest
+
+```{r}
+set.seed(041)
+start <- proc.time()
+controlparams <- trainControl(method = "cv", 5)
+model_3 <- train(classe ~ ., data = training, method = "rf", trControl = controlparams)
+predictions_3 <- predict(model_3, testing)
+confusionMatrix(factor(testing$classe), predictions_3)
+proc.time() - start
+```
+
+Of all the 3 models, Random forest performs exceptionally well with 99% accuracy followed by Linear SVM (69%) and then Decision Tree (59%). But Decision tree is very efficient in terms of computational complexity.
+
+## Comparing Models
+
+We will compare the models using resampler function which takes list of the models to compare.
+
+```{r}
+models_compare <- resamples(list(SVM = model_1, CART = model_2, RF = model_3))
+scales <- list(x=list(relation="free"), y=list(relation="free"))
+bwplot(models_compare, scales=scales)
+```
+
+As the plot suggests, Random Forest is clearly the winner among the 3 models considered.
+It has out of sample error rate of `0.0105`.
+
+## Making Predictions
+
+```{r}
+results <- predict(model_3, newdata = test)
+results
+```
